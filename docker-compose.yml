@@ -1,0 +1,93 @@
+services:
+  telegram_bot:
+    build:
+      context: .
+      dockerfile: telegram_bot/dockerfile
+    volumes:
+      - db_data:/app/database
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - TOKEN=7237846097:AAFp8188p63dLvy3KcxvRFSI06p3iAZ8sLg
+    networks:
+      - app-network 
+
+  llm_service:
+    build:
+      context: .
+      dockerfile: llm_service/dockerfile
+    ports:
+      - "8001:8000"
+    volumes:
+      - db_data:/app/database
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - db
+      - ollama
+    networks:
+      - app-network
+
+  web_backend:
+    build:
+      context: .
+      dockerfile: web_interface/dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/app/database
+    depends_on:
+      - db
+      - llm_service
+    networks:
+      - app-network
+
+  web_frontend:
+    build:
+      context: ./web_interface
+      dockerfile: dockerfile.frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - web_backend
+    networks:
+      - app-network
+
+  db:
+    image: python:3.9-slim
+    volumes:
+      - db_data:/app/database
+    working_dir: /app
+    command: >
+      bash -c "
+      apt update && apt install -y sqlite3 &&
+      pip install sqlalchemy &&
+      python -c 'import sys; sys.path.append(\"/app\"); from database.db import init_db; init_db()' &&
+      echo 'Database initialized' &&
+      sleep infinity"
+    healthcheck:
+      test: ["CMD", "sqlite3", "/app/database/support.db", "SELECT name FROM sqlite_master WHERE type='table' AND name='messages';"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - app-network
+
+volumes:
+  db_data:
+  ollama_data:
+
+networks:
+  app-network:
+    driver: bridge
